@@ -9,6 +9,9 @@ import xml.etree.ElementTree as ET
 ltp_segmentor = Segmentor()
 ltp_segmentor.load('../ltp_data/cws.model')
 def segment(corpus):
+    """
+    Use ltp sementor
+    """
     ret = []
     for sent in corpus:
         tokens = ltp_segmentor.segment(sent)
@@ -16,6 +19,9 @@ def segment(corpus):
     return ret
 
 def load_data(data_dir, fname):
+    """
+    Load xml file as dict
+    """
     fpath = os.path.join(data_dir, fname)
     print 'Loading data from %s'%fpath
     tree = ET.ElementTree(file=fpath)
@@ -36,12 +42,17 @@ def get_dict_corpus(data_dict, k1, k2):
 
 def prepare_data(train_dir, train_en, train_cn, unlabel_cn,
         test_dir, test_file, test_label):
+    """
+    Read data and do preprocess
+    """
+    # load data
     ten = load_data(train_dir, train_en)
     tcn = load_data(train_dir, train_cn)
     ucn = load_data(train_dir, unlabel_cn)
     test = load_data(test_dir, test_file)
     test_label = load_data('', test_label)
 
+    # merge summary and text
     train_en = get_dict_corpus(ten, 'summary', 'text') + \
             get_dict_corpus(tcn, 'tr_summary', 'tr_text')
     train_cn = get_dict_corpus(ten, 'tr_summary', 'tr_text') + \
@@ -53,16 +64,19 @@ def prepare_data(train_dir, train_en, train_cn, unlabel_cn,
     test_cn = get_dict_corpus(test, 'summary', 'text')
     test_en = get_dict_corpus(test, 'tr_summary', 'tr_text')
 
+    # change polarity sign into class id
     mp = {'P':1, 'N':0}
     train_label = ten['polarity'] + tcn['polarity']
     train_label = map(lambda x:mp[x], train_label)
     test_label = test_label['polarity']
     test_label = map(lambda x:mp[x], test_label)
 
+    # segmentation for chinese corpus
     train_cn = segment(train_cn)
     unlabel_cn = segment(unlabel_cn)
     test_cn = segment(test_cn)
 
+    # extract test id
     test_id = test['review_id']
 
     return train_en, train_cn, train_label, unlabel_en, unlabel_cn, test_cn, test_en, test_label, test_id

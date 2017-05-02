@@ -11,6 +11,10 @@ from scipy.sparse import coo_matrix, vstack
 from sklearn.feature_extraction.text import CountVectorizer
 
 class TrainThread(threading.Thread):
+    """ Train Thread
+    Train a SVM classifier using features of train set, and predict
+    labels for unlabeled data set.
+    """
     def __init__(self, feat_train, label, feat_unlabel):
         threading.Thread.__init__(self)
         self.feat_train = feat_train
@@ -26,6 +30,9 @@ class TrainThread(threading.Thread):
         return self.clf, self.y_unlabel
 
 def accuracy(Y, label):
+    """
+    Calculate accuarcy
+    """
     correct = 0
     for y, l in zip(Y, label):
         if y == l:
@@ -33,6 +40,9 @@ def accuracy(Y, label):
     return correct/float(len(Y))
 
 def get_feature(train, unlabel, test):
+    """
+    Get n-gram features, use term frequency as values
+    """
     tf_vectorizer = CountVectorizer(ngram_range=(1,2))
     feat_train = tf_vectorizer.fit_transform(train)
     feat_unlabel = tf_vectorizer.transform(unlabel)
@@ -40,6 +50,9 @@ def get_feature(train, unlabel, test):
     return feat_train, feat_unlabel, feat_test
 
 def top_k(y, idx, k, used):
+    """
+    Get top k idx for those not used, and value >= 0.5
+    """
     i = 0
     ret = []
     while len(ret) < k and i<len(y):
@@ -52,6 +65,10 @@ def top_k(y, idx, k, used):
     return ret
 
 def pick(y_prob, used, p, n):
+    """
+    Sample p and n most confident samples for
+    positive and negative polarity
+    """
     idx = range(len(y_prob))
     y = zip(y_prob, idx)
 
@@ -63,10 +80,12 @@ def pick(y_prob, used, p, n):
 
     return ep, en
 
-def add_to_train(feat_train, dict_unlabel, idx_p, idx_n, num_feature):
-    row = []
-    col = []
-    data = []
+def add_to_train(feat_train, dict_unlabel, idx_p, idx_n, \
+        num_feature):
+    """
+    Add samples in unlabeled set to train_set
+    """
+    row, col, data = [[], [], []]
     j = 0
     for idx in idx_p+idx_n:
         if idx in dict_unlabel:
@@ -80,10 +99,12 @@ def add_to_train(feat_train, dict_unlabel, idx_p, idx_n, num_feature):
     data = np.array(data)
     new_matrix = coo_matrix((data,(row, col)), shape=(j, num_feature))
     feat_train = vstack([feat_train, new_matrix])
-
     return feat_train
 
 def get_feature_dict(feature):
+    """
+    Make sparse feature dict
+    """
     fdict = {}
     cx = coo_matrix(feature)
     for i, j, c in zip(cx.row, cx.col, cx.data):
@@ -95,6 +116,9 @@ def get_feature_dict(feature):
 def co_training(train_dir, train_en, train_cn, unlabel_cn,
         eval_dir, test_file, test_label, test_out,
         p, n, num_iter):
+    """
+    Co-training process
+    """
     print 'Preparing data'
     train_en, train_cn, train_label, \
         unlabel_en, unlabel_cn,\
@@ -116,6 +140,7 @@ def co_training(train_dir, train_en, train_cn, unlabel_cn,
     y_test = [0 for _ in xrange(len(test_label))]
     used={}
     for i in xrange(num_iter):
+        # use two threads to accelerate training process
         # English classifier
         en_thread = TrainThread(feat_train_en, train_label, feat_unlabel_en)
         en_thread.start()
@@ -144,13 +169,14 @@ def co_training(train_dir, train_en, train_cn, unlabel_cn,
                 y = y_test_en[idx][1] * coef + y_test_cn[idx][1] * (1.-coef)
                 y_test[idx] = 1 if y >= 0.5 else 0
             acc = accuracy(y_test, test_label)
+            # update best accuracy and write result
             if acc > best_acc:
                 best_acc = acc
                 mp={1:'P', 0:'N'}
                 with open(test_out, 'w') as fout:
                     for tid, y in zip(test_id, y_test):
                         fout.write("0\tolivia_0\t%s\t%s\n"%(tid, mp[y]))
-        print 'Iter %d, acc:%f, best:%s'%(i, acc, best_acc)
+        print 'Iter %d, best accuracy:%s'%(i, best_acc)
 
 if __name__=='__main__':
     domain = sys.argv[1]
@@ -163,10 +189,10 @@ if __name__=='__main__':
     eval_dir = '../output/eval/'
     test_file = '%s.xml'%domain
     test_label = '../eval/label/%s/testResult.data'%domain
-    test_out = '../output/%s.out'%domain
 
-    p, n = [5, 5]
+    p, n = [10, 10]
     num_iter = 80
+    test_out = '../output/result/%s_%d_%d_%d.result'%(domain, p, n, num_iter)
 
     co_training(train_dir, train_en, train_cn, unlabel_cn,
             eval_dir, test_file, test_label, test_out,

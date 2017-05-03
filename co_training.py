@@ -10,24 +10,28 @@ from sklearn import svm
 from scipy.sparse import coo_matrix, vstack
 from sklearn.feature_extraction.text import CountVectorizer
 
-class TrainThread(threading.Thread):
+class SVMThread(threading.Thread):
     """ Train Thread
     Train a SVM classifier using features of train set, and predict
-    labels for unlabeled data set.
+    labels for unlabel and test sets.
     """
-    def __init__(self, feat_train, label, feat_unlabel):
+    def __init__(self, feat_train, label, feat_unlabel, feat_test):
         threading.Thread.__init__(self)
         self.feat_train = feat_train
         self.label = label
         self.feat_unlabel = feat_unlabel
-        self.clf = svm.SVC(kernel='linear', probability=True)
+        self.feat_test = feat_test
 
     def run(self):
-        self.clf.fit(self.feat_train, self.label)
-        self.y_unlabel = self.clf.predict_proba(self.feat_unlabel)
+        # train svm classifier
+        clf = svm.SVC(kernel='linear', probability=True)
+        clf.fit(self.feat_train, self.label)
+        # predict
+        self.y_unlabel = clf.predict_proba(self.feat_unlabel)
+        self.y_test = clf.predict_proba(self.feat_test)
 
     def get_result(self):
-        return self.clf, self.y_unlabel
+        return self.y_unlabel, self.y_test
 
 def accuracy(Y, label):
     """
@@ -138,20 +142,20 @@ def co_training(train_dir, train_en, train_cn, unlabel_cn,
     print 'Start training'
     best_acc = 0.0
     y_test = [0 for _ in xrange(len(test_label))]
-    used={}
+    used={} # is unlabeled sample with idx added to train set
     for i in xrange(num_iter):
         # use two threads to accelerate training process
         # English classifier
-        en_thread = TrainThread(feat_train_en, train_label, feat_unlabel_en)
+        en_thread = SVMThread(feat_train_en, train_label, feat_unlabel_en, feat_test_en)
         en_thread.start()
         # Chinese classifier
-        cn_thread = TrainThread(feat_train_cn, train_label, feat_unlabel_cn)
+        cn_thread = SVMThread(feat_train_cn, train_label, feat_unlabel_cn, feat_test_cn)
         cn_thread.start()
-        # thread join
+        # wait thread join and get result
         en_thread.join()
         cn_thread.join()
-        clf_en, y_unlabel_en = en_thread.get_result()
-        clf_cn, y_unlabel_cn = cn_thread.get_result()
+        y_unlabel_en, y_test_en = en_thread.get_result()
+        y_unlabel_cn, y_test_cn = cn_thread.get_result()
         # add unlabeled samples into training sets
         p_en, n_en = pick(y_unlabel_en, used, p, n)
         p_cn, n_cn = pick(y_unlabel_cn, used, p, n)
@@ -161,9 +165,7 @@ def co_training(train_dir, train_en, train_cn, unlabel_cn,
                 num_feat_unlabel_cn)
         train_label.extend([1 for _ in xrange(len(p_en))])
         train_label.extend([0 for _ in xrange(len(n_en))])
-        # test
-        y_test_en = clf_en.predict_proba(feat_test_en)
-        y_test_cn = clf_cn.predict_proba(feat_test_cn)
+        # combine two classifier result as test result
         for coef in [0.0, 0.3, 0.5, 0.7, 1.0]:
             for idx, ye, yc in zip(xrange(len(y_test)), y_test_en, y_test_cn):
                 y = y_test_en[idx][1] * coef + y_test_cn[idx][1] * (1.-coef)
@@ -177,9 +179,13 @@ def co_training(train_dir, train_en, train_cn, unlabel_cn,
                     for tid, y in zip(test_id, y_test):
                         fout.write("0\tolivia_0\t%s\t%s\n"%(tid, mp[y]))
         print 'Iter %d, best accuracy:%s'%(i, best_acc)
+        sys.stdout.flush()
 
 if __name__=='__main__':
     domain = sys.argv[1]
+    p = int(sys.argv[2])
+    n = int(sys.argv[3])
+    num_iter = int(sys.argv[4])
 
     train_dir = '../output/'
     train_en = 'Train_EN/%s.xml'%domain
@@ -190,8 +196,6 @@ if __name__=='__main__':
     test_file = '%s.xml'%domain
     test_label = '../eval/label/%s/testResult.data'%domain
 
-    p, n = [10, 10]
-    num_iter = 80
     test_out = '../output/result/%s_%d_%d_%d.result'%(domain, p, n, num_iter)
 
     co_training(train_dir, train_en, train_cn, unlabel_cn,
